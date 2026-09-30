@@ -1,0 +1,875 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta name="description"
+        content="Guía práctica para cambiar pools en Kea DHCPv4, entender T1 y T2 y diagnosticar clientes que conservan su dirección anterior.">
+
+  <title>Kea DHCPv4 · Cambio de pool y renovación de leases</title>
+
+  <style>
+    :root {
+      --bg: #0b1020;
+      --panel: #131c30;
+      --text: #e8edf6;
+      --muted: #afbdd3;
+      --accent: #70e1cc;
+      --blue: #95bcff;
+      --border: #2c3b55;
+      --warning: #ffd18b;
+      --radius: 18px;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont,
+                   "Segoe UI", sans-serif;
+      line-height: 1.7;
+    }
+
+    a { color: var(--blue); }
+    a:hover { color: var(--accent); }
+
+    :focus-visible {
+      outline: 3px solid var(--accent);
+      outline-offset: 5px;
+    }
+
+    .container {
+      width: min(1080px, 92%);
+      margin-inline: auto;
+    }
+
+    .skip {
+      position: absolute;
+      left: 16px;
+      top: -100px;
+      padding: 12px;
+      background: var(--panel);
+      z-index: 10;
+    }
+
+    .skip:focus { top: 12px; }
+
+    header {
+      border-bottom: 1px solid var(--border);
+      background: #0e1628;
+    }
+
+    .header-inner {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 18px;
+      padding-block: 18px;
+      flex-wrap: wrap;
+    }
+
+    .brand {
+      font-weight: 800;
+      color: var(--text);
+      text-decoration: none;
+    }
+
+    .brand span { color: var(--accent); }
+
+    nav {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 16px;
+    }
+
+    nav a {
+      font-size: .94rem;
+      text-decoration: none;
+    }
+
+    .hero { padding: 76px 0 48px; }
+
+    .badge {
+      display: inline-block;
+      padding: 5px 12px;
+      border: 1px solid #376657;
+      border-radius: 999px;
+      background: #102d2a;
+      color: var(--accent);
+      font-size: .82rem;
+      font-weight: 700;
+      letter-spacing: .05em;
+    }
+
+    h1 {
+      max-width: 880px;
+      margin: 22px 0;
+      font-size: clamp(2.2rem, 6vw, 4.2rem);
+      line-height: 1.12;
+      letter-spacing: -.045em;
+    }
+
+    h1 span { color: var(--accent); }
+
+    h2 {
+      margin: 0 0 18px;
+      font-size: clamp(1.55rem, 3vw, 2rem);
+      letter-spacing: -.025em;
+    }
+
+    h3 { line-height: 1.35; }
+    p { margin: 0 0 18px; }
+
+    .lead {
+      max-width: 790px;
+      color: var(--muted);
+      font-size: 1.14rem;
+    }
+
+    .actions {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-top: 26px;
+    }
+
+    .button {
+      display: inline-block;
+      padding: 11px 18px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      color: var(--text);
+      background: var(--panel);
+      text-decoration: none;
+      font-weight: 650;
+    }
+
+    .button.primary {
+      background: var(--accent);
+      color: #092320;
+      border-color: var(--accent);
+    }
+
+    section {
+      margin-bottom: 46px;
+      scroll-margin-top: 24px;
+    }
+
+    .panel {
+      padding: clamp(20px, 4vw, 32px);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--panel);
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    .grid > * { min-width: 0; }
+
+    .card {
+      padding: 22px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--panel);
+    }
+
+    .card h3 { margin-top: 8px; }
+    .card p { color: var(--muted); margin-bottom: 0; }
+
+    .label {
+      color: var(--accent);
+      font-size: .78rem;
+      font-weight: 750;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+
+    .notice {
+      margin-block: 20px;
+      padding: 18px 20px;
+      border-left: 4px solid var(--warning);
+      border-radius: 0 10px 10px 0;
+      color: #f6e2c0;
+      background: #2b241c;
+    }
+
+    .notice p:last-child { margin-bottom: 0; }
+
+    .step {
+      padding-block: 22px;
+      border-top: 1px solid var(--border);
+    }
+
+    .step h3 { margin-top: 0; }
+
+    code {
+      font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+      overflow-wrap: anywhere;
+    }
+
+    :not(pre) > code {
+      padding: 2px 6px;
+      background: #0b1221;
+      color: #a9e9dd;
+      border-radius: 5px;
+    }
+
+    .codebox {
+      margin-block: 16px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: #080f1d;
+    }
+
+    .codebar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 8px 14px;
+      border-bottom: 1px solid var(--border);
+      color: var(--muted);
+      font-size: .82rem;
+    }
+
+    button {
+      padding: 6px 10px;
+      border: 1px solid #465b77;
+      border-radius: 6px;
+      color: var(--text);
+      background: #17253b;
+      cursor: pointer;
+      font: inherit;
+    }
+
+    button:hover { background: #243754; }
+
+    pre {
+      margin: 0;
+      padding: 18px;
+      overflow-x: auto;
+      font-size: .9rem;
+      line-height: 1.65;
+    }
+
+    pre code { overflow-wrap: normal; }
+
+    .flow {
+      padding: 20px;
+      overflow-x: auto;
+      border-radius: 12px;
+      border: 1px dashed #46756d;
+      background: #102621;
+      color: #b2f0df;
+      white-space: pre;
+      font-family: ui-monospace, Consolas, monospace;
+      font-size: .9rem;
+    }
+
+    .table-wrap { overflow-x: auto; }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      text-align: left;
+    }
+
+    th, td {
+      padding: 14px;
+      border-bottom: 1px solid var(--border);
+      vertical-align: top;
+    }
+
+    th { color: var(--accent); }
+    td { color: var(--muted); }
+
+    details {
+      padding: 18px 0;
+      border-bottom: 1px solid var(--border);
+    }
+
+    summary { cursor: pointer; font-weight: 700; }
+    details p { margin: 14px 0 0; color: var(--muted); }
+
+    .sources li { margin-block: 10px; }
+    .muted, small { color: var(--muted); }
+
+    footer {
+      padding: 30px 0;
+      border-top: 1px solid var(--border);
+      color: var(--muted);
+      font-size: .9rem;
+    }
+
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+
+    @media (max-width: 760px) {
+      .grid { grid-template-columns: 1fr; }
+      .hero { padding-top: 46px; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+    }
+  </style>
+</head>
+
+<body>
+  <a class="skip" href="#contenido">Saltar al contenido</a>
+
+  <header>
+    <div class="container header-inner">
+      <a class="brand" href="#">juankafdez05 <span>/ Kea DHCP</span></a>
+      <nav aria-label="Navegación principal">
+        <a href="#problema">Problema</a>
+        <a href="#solucion">Procedimiento</a>
+        <a href="#diagnostico">Diagnóstico</a>
+        <a href="#fuentes">Fuentes</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="contenido" class="container">
+    <div class="hero">
+      <span class="badge">GUÍA DE ADMINISTRACIÓN · DHCPv4</span>
+      <h1>Cambias el pool.<br><span>El cliente conserva su IP.</span></h1>
+
+      <p class="lead">
+        Entiende qué ocurre con las concesiones existentes al modificar
+        un rango en Kea y cómo preparar, aplicar y verificar el cambio
+        sin confundirlo con una renumeración forzada.
+      </p>
+
+      <div class="actions">
+        <a class="button primary" href="#solucion">Ver el procedimiento</a>
+        <a class="button" href="#renovacion">Entender T1 y T2</a>
+      </div>
+    </div>
+
+    <section id="problema" class="panel">
+      <h2>01. El escenario</h2>
+
+      <p>
+        Un cliente dispone de una concesión del rango antiguo.
+        El administrador cambia el pool y espera que, al renovar,
+        el cliente obtenga inmediatamente una dirección del nuevo rango.
+      </p>
+
+      <div class="codebox">
+        <div class="codebar">Ejemplo dentro de 172.21.0.0/24</div>
+        <pre><code>Pool anterior: 172.21.0.10 - 172.21.0.30
+Pool nuevo:    172.21.0.40 - 172.21.0.70
+IP del cliente antes del cambio: 172.21.0.20</code></pre>
+      </div>
+
+      <div class="notice">
+        <p>
+          <strong>La distinción importante:</strong>
+          modificar un pool no envía por sí mismo una orden al cliente
+          para abandonar la dirección que ya está utilizando.
+        </p>
+      </div>
+
+      <p>
+        El pool configurado, el registro de la concesión en el servidor
+        y el estado del cliente son elementos diferentes.
+        No debe deducirse el resultado de una renovación únicamente
+        mirando el nuevo rango.
+      </p>
+
+      <p class="muted">
+        No se afirma que todas las versiones de Kea renueven una
+        dirección fuera del pool. La respuesta concreta debe verificarse
+        con la versión, configuración y tráfico del entorno afectado.
+        Consulta <a href="#fuente-kea">el manual de Kea</a>.
+      </p>
+    </section>
+
+    <section id="renovacion">
+      <h2>02. Qué significan T1 y T2</h2>
+
+      <div class="grid">
+        <article class="card">
+          <span class="label">T1 · Renewing</span>
+          <h3>Intentar conservar la IP</h3>
+          <p>
+            El cliente intenta renovar con el servidor que le concedió
+            la dirección. No está solicitando necesariamente una IP distinta.
+          </p>
+        </article>
+
+        <article class="card">
+          <span class="label">T2 · Rebinding</span>
+          <h3>Buscar una renovación</h3>
+          <p>
+            Si no logró renovar, el cliente amplía la petición
+            mediante broadcast para intentar obtener respuesta.
+          </p>
+        </article>
+
+        <article class="card">
+          <span class="label">Expiración</span>
+          <h3>Dejar de usar la concesión</h3>
+          <p>
+            Si la concesión expira sin renovación, el cliente deja
+            de utilizarla y reinicia la adquisición de configuración.
+          </p>
+        </article>
+      </div>
+
+      <p class="muted" style="margin-top:18px">
+        Según RFC 2131, los valores predeterminados son T1 = 50 %
+        y T2 = 87,5 % del tiempo de concesión. Pueden negociarse
+        otros valores. <a href="#fuente-rfc">Fuente: RFC 2131, §4.4.5.</a>
+      </p>
+
+      <div class="notice">
+        <p>
+          Reducir los temporizadores del servidor no modifica
+          retroactivamente los que un cliente ya recibió.
+          Planifica los tiempos antes de la migración.
+        </p>
+      </div>
+    </section>
+
+    <section id="solucion" class="panel">
+      <h2>03. Procedimiento para cambiar el pool</h2>
+
+      <p>
+        Ejemplo para un servidor independiente administrado mediante
+        archivos locales y systemd. Adapta las rutas, la unidad y el
+        mecanismo de aplicación a tu instalación.
+      </p>
+
+      <div class="notice">
+        <p>
+          <strong>Antes de empezar:</strong>
+          prepara acceso de recuperación y una ventana de mantenimiento.
+          En HA, configuración mediante backend o appliances,
+          utiliza el procedimiento de su gestor.
+        </p>
+      </div>
+
+      <article class="step">
+        <h3>1. Identifica la configuración efectiva</h3>
+
+        <p>
+          Confirma qué binario y archivo utiliza realmente el proceso.
+          El nombre de servicio siguiente es solo un ejemplo.
+        </p>
+
+        <div class="codebox">
+          <div class="codebar">Inventario
+            <button type="button" class="copy" hidden>Copiar</button>
+          </div>
+          <pre><code>kea-dhcp4 -V
+kea-dhcp4 -W
+sudo systemctl cat kea-dhcp4-server</code></pre>
+        </div>
+
+        <p>
+          Revisa la subred, sus reservas, clases, otros pools,
+          relays y hooks. No publiques credenciales ni configuraciones
+          reales completas en un repositorio público.
+        </p>
+      </article>
+
+      <article class="step">
+        <h3>2. Guarda una copia de seguridad</h3>
+
+        <div class="codebox">
+          <div class="codebar">Copia local
+            <button type="button" class="copy" hidden>Copiar</button>
+          </div>
+          <pre><code>sudo cp -a /etc/kea/kea-dhcp4.conf \
+  "/etc/kea/kea-dhcp4.conf.bak.$(date +%Y%m%d-%H%M%S)"</code></pre>
+        </div>
+
+        <p>
+          Si utilizas archivos incluidos, respalda también los que
+          vayas a modificar. Guarda la copia fuera del repositorio público.
+        </p>
+      </article>
+
+      <article class="step">
+        <h3>3. Cambia el pool afectado</h3>
+
+        <p>
+          Dentro de la subred existente, modifica el atributo
+          <code>pool</code> correspondiente.
+          Conserva el ID de subred y los demás atributos.
+          No reemplaces otros pools que sigan siendo necesarios.
+        </p>
+
+        <div class="codebox">
+          <div class="codebar">Fragmento, no configuración completa
+            <button type="button" class="copy" hidden>Copiar</button>
+          </div>
+          <pre><code>"pools": [
+  {
+    "pool": "172.21.0.40 - 172.21.0.70"
+  }
+]</code></pre>
+        </div>
+
+        <p>
+          Comprueba que el nuevo rango pertenece a la subred y no
+          contiene direcciones usadas de forma estática.
+          Revisa reservas que puedan devolver una dirección antigua.
+        </p>
+      </article>
+
+      <article class="step">
+        <h3>4. Valida antes de aplicar</h3>
+
+        <div class="codebox">
+          <div class="codebar">Validación
+            <button type="button" class="copy" hidden>Copiar</button>
+          </div>
+          <pre><code>sudo kea-dhcp4 -t /etc/kea/kea-dhcp4.conf</code></pre>
+        </div>
+
+        <p>
+          Utiliza el mismo binario que ejecuta el servicio.
+          Si la validación falla, no continúes.
+          Una validación correcta no demuestra que el proceso activo
+          ya haya cargado el cambio ni que la migración funcione.
+        </p>
+      </article>
+
+      <article class="step">
+        <h3>5. Aplica y comprueba</h3>
+
+        <p>
+          Este ejemplo reinicia el servicio y puede interrumpir
+          temporalmente DHCP. Sustituye la unidad por la de tu instalación.
+        </p>
+
+        <div class="codebox">
+          <div class="codebar">Aplicación en ventana de mantenimiento
+            <button type="button" class="copy" hidden>Copiar</button>
+          </div>
+          <pre><code>sudo systemctl restart kea-dhcp4-server
+sudo systemctl status kea-dhcp4-server --no-pager -l
+sudo journalctl -u kea-dhcp4-server \
+  --since "5 minutes ago" --no-pager</code></pre>
+        </div>
+      </article>
+
+      <article class="step">
+        <h3>6. Migra y verifica los clientes</h3>
+
+        <p>
+          Para un cliente controlado, utiliza el mecanismo de su sistema
+          operativo o gestor de red para liberar la concesión y comenzar
+          una adquisición nueva. Una simple renovación puede intentar
+          conservar la misma dirección.
+        </p>
+
+        <p>
+          Hazlo desde consola o con acceso alternativo: liberar
+          la dirección puede cortar tu sesión remota.
+          Para una migración gradual, observa las renovaciones
+          reales y los tiempos concedidos.
+        </p>
+
+        <p class="muted">
+          Referencia del procedimiento:
+          <a href="#fuente-kea">manual del servidor DHCPv4 de Kea</a>.
+        </p>
+      </article>
+    </section>
+
+    <section id="nak" class="panel">
+      <h2>04. ¿Y si necesito el cambio exactamente en T1?</h2>
+
+      <p>
+        Es un requisito diferente de cambiar el pool.
+        Un DHCPNAK recibido en el estado correspondiente hace que
+        el cliente abandone la configuración y vuelva a iniciar
+        la adquisición, según RFC 2131.
+      </p>
+
+      <div class="flow"
+           role="img"
+           aria-label="Flujo esperado si se rechaza una renovación mediante NAK">
+REQUEST de renovación
+        ↓
+NAK recibido por el cliente
+        ↓
+DISCOVER → OFFER → REQUEST → ACK</div>
+
+      <div class="notice">
+        <p>
+          <strong>No hay un hook universal validado en esta guía.</strong>
+          No se recomienda falsificar la petición con una IP artificial
+          para intentar provocar indirectamente un NAK.
+        </p>
+      </div>
+
+      <p>
+        Si el comportamiento nativo no satisface el requisito,
+        un hook específico necesitará desarrollo y pruebas para
+        la versión de Kea utilizada.
+      </p>
+
+      <ul>
+        <li>Delimitar las subredes y clientes afectados.</li>
+        <li>Respetar reservas válidas, clases y redes compartidas.</li>
+        <li>Comprobar la concesión y su pertenencia al cliente.</li>
+        <li>Coordinar el comportamiento con HA y otros hooks.</li>
+        <li>Evitar confirmar una renovación que luego se rechace.</li>
+        <li>Disponer de observación previa, logs y plan de reversión.</li>
+      </ul>
+
+      <p class="muted">
+        El listado anterior es una propuesta de requisitos,
+        no una implementación probada.
+        <a href="#fuente-hooks">Consulta la API de hooks de Kea.</a>
+      </p>
+    </section>
+
+    <section id="diagnostico" class="panel">
+      <h2>05. Comprueba el tráfico, no solo el log</h2>
+
+      <div class="codebox">
+        <div class="codebar">Captura DHCPv4 en Linux
+          <button type="button" class="copy" hidden>Copiar</button>
+        </div>
+        <pre><code>sudo tcpdump -ni any -s0 -vvv \
+  'udp port 67 or udp port 68'</code></pre>
+      </div>
+
+      <p>
+        Realiza la prueba con un cliente identificado y conserva
+        los resultados en un lugar privado. Las capturas pueden
+        contener identificadores y datos de tu red.
+      </p>
+
+      <div class="table-wrap">
+        <table>
+          <caption class="sr-only">
+            Evidencias para diagnosticar una migración de pool
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Evidencia</th>
+              <th scope="col">Qué revisar</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>REQUEST con la dirección antigua</td>
+              <td>
+                El cliente está intentando conservarla.
+                Comprueba su estado y las opciones del paquete.
+              </td>
+            </tr>
+            <tr>
+              <td>ACK para la dirección antigua</td>
+              <td>
+                Identifica al servidor que responde y revisa
+                configuración activa, reservas y políticas aplicables.
+              </td>
+            </tr>
+            <tr>
+              <td>No hay respuesta</td>
+              <td>
+                Revisa logs, selección de subred, conectividad,
+                firewall y relays.
+              </td>
+            </tr>
+            <tr>
+              <td>NAK</td>
+              <td>
+                Confirma qué servidor lo envía y si el cliente
+                reinicia después la adquisición.
+              </td>
+            </tr>
+            <tr>
+              <td>ACK con dirección del nuevo pool</td>
+              <td>
+                Comprueba también máscara, puerta de enlace,
+                DNS y conectividad del cliente.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p class="muted" style="margin-top:18px">
+        Un mensaje del hook indicando “forzando NAK” no demuestra
+        que se haya enviado o recibido un DHCPNAK.
+        Estas comprobaciones son una lista de diagnóstico propuesta;
+        deben interpretarse junto al tráfico y los logs del entorno.
+      </p>
+    </section>
+
+    <section id="faq" class="panel">
+      <h2>06. Preguntas frecuentes</h2>
+
+      <details>
+        <summary>¿Debo borrar todas las concesiones antiguas?</summary>
+        <p>
+          No como procedimiento automático. Borrar el registro
+          del servidor no ordena al cliente abandonar inmediatamente
+          su dirección. Primero diagnostica el caso y prepara una
+          migración controlada.
+        </p>
+      </details>
+
+      <details>
+        <summary>¿Cambiar el pool reinicia los temporizadores del cliente?</summary>
+        <p>
+          No por sí mismo. El cliente sigue los parámetros de su
+          concesión hasta que los actualice mediante DHCP o cambie
+          de estado.
+        </p>
+      </details>
+
+      <details>
+        <summary>¿Una dirección fuera del pool es siempre incorrecta?</summary>
+        <p>
+          No. Kea admite reservas fuera de los pools dinámicos.
+          Un mecanismo de rechazo debe tenerlas en cuenta.
+        </p>
+      </details>
+
+      <details>
+        <summary>¿Esta página administra mi servidor?</summary>
+        <p>
+          No. Es documentación estática. No se conecta a Kea,
+          no solicita contraseñas y no ejecuta comandos.
+          Los botones solo copian texto.
+        </p>
+      </details>
+
+      <details>
+        <summary>¿Qué hago si el cambio falla?</summary>
+        <p>
+          Revisa los logs. Si necesitas revertir, restaura la copia
+          correspondiente, valida de nuevo y aplica la configuración
+          anterior con tu gestor del servicio. Restaurar el archivo
+          no deshace automáticamente concesiones ya entregadas.
+        </p>
+      </details>
+    </section>
+
+    <section id="fuentes" class="panel">
+      <h2>Fuentes oficiales</h2>
+
+      <p class="muted">
+        Selecciona en la documentación de Kea la versión que
+        corresponda a tu instalación.
+      </p>
+
+      <ol class="sources">
+        <li id="fuente-rfc">
+          <a href="https://www.rfc-editor.org/rfc/rfc2131.html">
+            RFC 2131 — Dynamic Host Configuration Protocol
+          </a>
+          <br>
+          <small>
+            Especialmente §4.4.4 y §4.4.5: estados del cliente,
+            renovaciones y tratamiento de DHCPNAK.
+          </small>
+        </li>
+
+        <li id="fuente-kea">
+          <a href="https://kea.readthedocs.io/en/stable/arm/dhcp4-srv.html">
+            Kea ARM — Servidor DHCPv4
+          </a>
+          <br>
+          <small>
+            Configuración, pools, reservas, temporizadores
+            y ejecución del servidor.
+          </small>
+        </li>
+
+        <li id="fuente-hooks">
+          <a href="https://reports.kea.isc.org/dev_guide/de/df3/dhcpv4Hooks.html">
+            Kea — API de hooks DHCPv4
+          </a>
+          <br>
+          <small>
+            Referencia de desarrollo; comprueba su correspondencia
+            con tu versión instalada.
+          </small>
+        </li>
+
+        <li>
+          <a href="https://kea.readthedocs.io/en/stable/kea-messages.html">
+            Kea Messages Manual
+          </a>
+          <br>
+          <small>Consulta de mensajes para interpretar los logs.</small>
+        </li>
+      </ol>
+    </section>
+  </main>
+
+  <footer>
+    <div class="container">
+      <p>
+        <a href="https://github.com/juankafdez05">juankafdez05</a>
+        · Documentación sobre Kea DHCPv4.
+      </p>
+      <p>
+        Guía orientativa, sin garantía de compatibilidad universal.
+        Prueba los cambios en laboratorio antes de producción.
+      </p>
+    </div>
+  </footer>
+
+  <div id="copy-status" class="sr-only" role="status" aria-live="polite"></div>
+
+  <script>
+    // Sin dependencias externas. No se envían datos a ningún servidor.
+    if (navigator.clipboard && window.isSecureContext) {
+      document.querySelectorAll(".copy").forEach((button) => {
+        button.hidden = false;
+
+        button.addEventListener("click", async () => {
+          const code = button.closest(".codebox").querySelector("code");
+          const status = document.getElementById("copy-status");
+          button.disabled = true;
+
+          try {
+            await navigator.clipboard.writeText(code.textContent);
+            button.textContent = "Copiado";
+            status.textContent = "Comando copiado al portapapeles.";
+          } catch {
+            button.textContent = "Selecciona el texto";
+            status.textContent =
+              "No se pudo copiar. Selecciona y copia el texto manualmente.";
+          }
+
+          window.setTimeout(() => {
+            button.textContent = "Copiar";
+            button.disabled = false;
+          }, 2500);
+        });
+      });
+    }
+  </script>
+</body>
+</html>
